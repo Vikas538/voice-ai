@@ -13,7 +13,7 @@ def initialize_redis(retries: int = 1):
         host=os.environ.get("REDISHOST", "localhost"),
         port=int(os.environ.get("REDISPORT", 6379)),
         username=os.environ.get("REDISUSER", None),
-        password=os.environ.get("REDISPASSWORD", None),
+        password=os.environ.get("REDISPASSWORD", "password"),
         db=0,
         decode_responses=True,
         retry=retry,
@@ -26,4 +26,4 @@ def initialize_redis(retries: int = 1):
 async def get_config_by_room_id(room_id: str) -> dict:
     redis = initialize_redis()
     config = await redis.get(room_id)
-    return json.loads(config) if config else {}
+    return config

@@ -25,7 +25,7 @@ from livekit.agents.pipeline import VoicePipelineAgent
 from livekit.agents.multimodal import MultimodalAgent
 
 
-from llm_actions import AssistantFnc
+# from llm_actions import AssistantFnc
 
 
 # Initialize the Assistant Context
@@ -40,21 +40,22 @@ def prewarm(proc: JobProcess):
 
 
 async def entrypoint(ctx: JobContext):
-    config = await get_config_by_room_id(ctx.room.name)
+    print(ctx.room)
+    config = await get_config_by_room_id("c78c8925-c88f-4512-a872-e964f19f2ab8")
     config_json = json.loads(config)
+    print("config_json==================================================>",config_json.get("api_key"))
     system_prompt = config_json.get("system_prompt", "")
     actions = config_json.get("actions", [])
     kb_id = config_json.get("kb_id", "")
+    # action_class = AssistantFnc()
 
-    fnc_ctx = AssistantFnc(actions,kb_id)
+    # fnc_ctx = action_class.register_available_actions(actions=actions,kb_id=kb_id)
+    # fnc_ctx = action_class
+
 
     initial_ctx = llm.ChatContext().append(
         role="system",
-        text=(
-            "You are a voice assistant created by LiveKit. Your interface with users will be voice. "
-            "You should use short and concise responses, and avoiding usage of unpronouncable punctuation. "
-            "You were created as a demo to showcase the capabilities of LiveKit's agents framework."
-        ),
+        text=system_prompt,
     )
 
     logger.info(f"connecting to room {ctx.room.name}")
@@ -71,10 +72,11 @@ async def entrypoint(ctx: JobContext):
     agent = VoicePipelineAgent(
         vad=ctx.proc.userdata["vad"],
         stt=deepgram.STT(),
-        llm=openai.LLM(model="gpt-4o-mini"),
+        llm=openai.LLM(model="gpt-4o-mini",api_key=config_json.get("openai_api_key")),
         tts=azure.TTS(
-            speech_key=os.getenv("AZURE_SPEECH_KEY"),
-            speech_region=os.getenv("AZURE_SPEECH_REGION"),
+            speech_key="d667d32b10934e0084577bc79a258f68",
+            speech_region="centralus",
+            voice=config_json.get("voice_id","en-US-JennyNeural"),
         ),
         turn_detector=turn_detector.EOUModel(),
         # minimum delay for endpointing, used when turn detector believes the user is done with their turn
@@ -82,7 +84,6 @@ async def entrypoint(ctx: JobContext):
         # maximum delay for endpointing, used when turn detector does not believe the user is done with their turn
         max_endpointing_delay=5.0,
         chat_ctx=initial_ctx,
-        fnc_ctx=fnc_ctx
     )
 
 
