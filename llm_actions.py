@@ -11,18 +11,6 @@ from dataclasses import dataclass
 
 logger = logging.getLogger("llm_actions")
 
-class _UseDocMarker:
-    pass
-
-@dataclass(frozen=True)
-class _AIFncMetadata:
-    name: str
-    description: str
-    auto_retry: bool
-
-
-METADATA_ATTR = "__livekit_ai_metadata__"
-USE_DOCSTRING = _UseDocMarker()
 
 
 def dynamic_ai_callable(*, name=None, description=None, auto_retry=False):
@@ -48,33 +36,6 @@ def dynamic_ai_callable(*, name=None, description=None, auto_retry=False):
 
 
 import types
-
-def _set_metadata(
-    f: Callable,
-    name: str | None = None,
-    desc: str | _UseDocMarker = USE_DOCSTRING,
-    auto_retry: bool = False,
-) -> None:
-    """Attach AI metadata to a function, ensuring that bound methods are handled correctly."""
-    
-    # If `f` is a bound method, get its original function
-    if isinstance(f, types.MethodType):
-        f = f.__func__  # Unbind method to get the actual function
-    
-    if isinstance(desc, _UseDocMarker):
-        docstring = inspect.getdoc(f)
-        if docstring is None:
-            raise ValueError(
-                f"Missing docstring for function {f.__name__}, "
-                "use explicit description or provide docstring."
-            )
-        desc = docstring
-
-    metadata = _AIFncMetadata(
-        name=name or f.__name__, description=desc, auto_retry=auto_retry
-    )
-
-    setattr(f, METADATA_ATTR, metadata)  # ✅ Now it will work for both functions and bound methods
 
 
 
@@ -210,7 +171,7 @@ class AssistantFnc(llm.FunctionContext):
     # the llm.ai_callable decorator marks this function as a tool available to the LLM
 
     # by default, it'll use the docstring as the function's description
-    @llm.ai_callable()
+    @llm.ai_callable(name="get_weather",description="get weather action id is 1234567890")
     async def get_weather(
         self,
         # by using the Annotated type, arg description and type are available to the LLM
