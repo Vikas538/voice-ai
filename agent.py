@@ -94,26 +94,11 @@ def get_tts_class(model_name:str,voice_config:dict):
 
 async def entrypoint(ctx: JobContext):
     print(ctx.room)
-    config = await get_config_by_room_id(ctx.room.name)
-    config_json = json.loads(config)
-    print("config_json==================================================>",config_json.get("api_key"))
-    system_prompt = config_json.get("system_prompt", "")
-    actions = config_json.get("actions", [])
-    kb_id = config_json.get("kb_id", "")
-    action_class = AssistantFnc()
-    llm_class = get_llm_class_by_model_name(config_json.get("model"),config_json.get("api_key"))
-    tts_class = get_tts_class(config_json.get("model"),config_json.get("voice_config"))
-    stt_class = get_stt_class(config_json.get("model"),config_json.get("api_key"))
+
     # fnc_ctx = action_class.register_available_actions(actions=actions,kb_id=kb_id)
-    fnc_ctx = action_class
 
 
-    initial_ctx = llm.ChatContext().append(
-        role="system",
-        text=(
-            "talk about the llm model used"
-        ),
-    )
+   
 
     logger.info(f"connecting to room {ctx.room.name}")
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -122,6 +107,23 @@ async def entrypoint(ctx: JobContext):
     participant = await ctx.wait_for_participant()
     logger.info(f"starting voice assistant for participant {participant.identity}")
 
+    config = await get_config_by_room_id(ctx.room.name)
+    config_json = json.loads(config)
+    system_prompt = config_json.get("system_prompt", "")
+    actions = config_json.get("actions", [])
+    kb_id = config_json.get("kb_id", "")
+    action_class = AssistantFnc()
+    agent_config = config_json.get("agent", {})
+    tts_config = config_json.get("synthesizer", {})
+    stt_config = config_json.get("transcriber", {})
+    llm_class = get_llm_class_by_model_name(agent_config.get("model"),config_json.get("api_key"))
+    stt_class = get_stt_class(stt_config.get("model"),stt_config.get('api_key'))
+    tts_class = get_tts_class(tts_config.get("model"),tts_config)
+    initial_ctx = llm.ChatContext().append(
+        role="system",
+            text=system_prompt,
+    )
+
     # This project is configured to use Deepgram STT, OpenAI LLM and Cartesia TTS plugins
     # Other great providers exist like Cerebras, ElevenLabs, Groq, Play.ht, Rime, and more
     # Learn more and pick the best one for your app:
@@ -129,14 +131,15 @@ async def entrypoint(ctx: JobContext):
     agent = VoicePipelineAgent(
         vad=ctx.proc.userdata["vad"],
         stt=stt_class,
-        llm=llm_class,#openai.LLM(model="gpt-4o-mini",api_key=config_json.get("openai_api_key")),
+        llm=llm_class,
         tts=tts_class,
         turn_detector=turn_detector.EOUModel(),
         # minimum delay for endpointing, used when turn detector believes the user is done with their turn
-        min_endpointing_delay=0.5,
+        min_endpointing_delay=0.3,
         # maximum delay for endpointing, used when turn detector does not believe the user is done with their turn
-        max_endpointing_delay=5.0,
+        max_endpointing_delay=3.0,
         chat_ctx=initial_ctx,
+        fnc_ctx=action_class
     )
 
 
