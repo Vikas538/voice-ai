@@ -112,6 +112,8 @@ async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollect
     async with aiohttp.ClientSession() as session:
         async with session.post(url="hhttps://dev-contactswing-fastapi-962560522883.us-central1.run.app/v2/save/conversations",json={"conversations":convsersations,"session_id":ctx.room.name,"llm_prompt_tokens":usage_summary.llm_prompt_tokens,"llm_completion_tokens":usage_summary.llm_completion_tokens,"tts_characters_count":usage_summary.tts_characters_count,"stt_audio_duration":usage_summary.stt_audio_duration}) as response:
             print(response)
+    
+    conversation_log.pop(ctx.room.name)
 
     ctx.shutdown()
 
