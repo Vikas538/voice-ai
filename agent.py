@@ -15,6 +15,7 @@ from livekit.agents.pipeline import VoicePipelineAgent
 from livekit.plugins import cartesia, openai, deepgram, silero, turn_detector,azure,google,playai,elevenlabs
 from redis_utils import get_config_by_room_id
 import os,json
+conversation_log = {}
 
 
 import aiohttp
@@ -23,12 +24,15 @@ from typing import Annotated
 from livekit.agents import llm
 from livekit.agents.pipeline import VoicePipelineAgent
 from livekit.agents.multimodal import MultimodalAgent
-
+from livekit.agents.llm import ChatMessage
 
 from llm_actions import AssistantFnc
 
 
+
+
 # Initialize the Assistant Context
+
 
 
 load_dotenv(dotenv_path=".env.local")
@@ -92,10 +96,54 @@ def get_tts_class(model_name:str,voice_config:dict):
 )
 
 
+
+# import logging
+
+
+# import aiofiles
+# from dotenv import load_dotenv
+# from livekit.agents import (
+#     AutoSubscribe,
+#     JobContext,
+#     WorkerOptions,
+#     cli,
+# )
+
+# from livekit.agents.multimodal.multimodal_agent import EventTypes
+# from livekit.plugins import openai
+
+
+async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollector):
+    print("====================================>shutdown",ctx)
+    usage_summary = usage_collector.get_summary()
+    print(ctx.room.name)
+    convsersations = []
+    print(conversation_log.get(ctx.room.name))
+    if not conversation_log.get(ctx.room.name):
+        return
+    for log in conversation_log.get(ctx.room.name):
+        print(log.role,log.content)
+        convsersations.append({
+            "role":log.role,
+            "content":log.content
+        })
+    # if len is > 0 call api 
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url="hhttps://dev-contactswing-fastapi-962560522883.us-central1.run.app/v2/save/conversations",json={"conversations":convsersations,"session_id":ctx.room.name,"llm_prompt_tokens":usage_summary.llm_prompt_tokens,"llm_completion_tokens":usage_summary.llm_completion_tokens,"tts_characters_count":usage_summary.tts_characters_count,"stt_audio_duration":usage_summary.stt_audio_duration}) as response:
+            print(response)
+
+    ctx.shutdown()
+
+    return convsersations
+
+
+
 async def entrypoint(ctx: JobContext):
     print(ctx.room)
 
     # fnc_ctx = action_class.register_available_actions(actions=actions,kb_id=kb_id)
+
 
 
    
@@ -108,11 +156,13 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"starting voice assistant for participant {participant.identity}")
 
     config = await get_config_by_room_id(ctx.room.name)
+    print("config=======================>",config)
     config_json = json.loads(config)
     system_prompt = config_json.get("system_prompt", "")
     actions = config_json.get("actions", [])
     kb_id = config_json.get("kb_id", "")
     action_class = AssistantFnc()
+    initial_message = config_json.get("initial_message", "Hey, how can I help you today?")
     agent_config = config_json.get("agent", {})
     tts_config = config_json.get("synthesizer", {})
     stt_config = config_json.get("transcriber", {})
@@ -142,18 +192,46 @@ async def entrypoint(ctx: JobContext):
         fnc_ctx=action_class
     )
 
+    # cp = ConversationPersistor(model=agent, log="log.txt")
+    # cp.start()
+
 
     usage_collector = metrics.UsageCollector()
+    ctx._shutdown_callbacks.append(lambda reason: shutdown_callback(ctx, usage_collector))
 
     @agent.on("metrics_collected")
     def on_metrics_collected(agent_metrics: metrics.AgentMetrics):
         metrics.log_metrics(agent_metrics)
         usage_collector.collect(agent_metrics)
 
+    async def log_usage():
+        summary = usage_collector.get_summary()
+        logger.info(f"Usage:=========================================> ${summary}")
+
+    @agent.on("user_speech_committed")
+    def on_user_speech_committed(user_msg: ChatMessage):
+        print("====================================>",user_msg)
+        if ctx.room.name not in conversation_log:
+            conversation_log[ctx.room.name] = []
+        conversation_log[ctx.room.name].append(user_msg)
+
+    @agent.on("agent_speech_committed")
+    def on_agent_speech_committed(agent_msg: ChatMessage):
+        print("====================================>",agent_msg,ctx.room.name)
+        if ctx.room.name not in conversation_log:
+            conversation_log[ctx.room.name] = []
+        conversation_log[ctx.room.name].append(agent_msg)
+
+
+
     agent.start(ctx.room, participant)
 
     # The agent should be polite and greet the user when it joins :)
-    await agent.say("Hey, how can I help you today?", allow_interruptions=True)
+    await agent.say(initial_message, allow_interruptions=True)
+
+
+
+
 
 
 if __name__ == "__main__":
@@ -161,6 +239,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-             agent_name="voice_widget"
+             agent_name="voice_widget",
+             
         ),
     )
