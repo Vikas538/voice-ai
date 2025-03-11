@@ -31,10 +31,6 @@ from llm_actions import AssistantFnc
 
 
 
-# Initialize the Assistant Context
-
-
-
 load_dotenv(dotenv_path=".env.local")
 logger = logging.getLogger("voice-agent")
 
@@ -95,22 +91,6 @@ def get_tts_class(model_name:str,voice_config:dict):
     chunk_length_schedule=[80, 120, 200, 260],
 )
 
-
-
-# import logging
-
-
-# import aiofiles
-# from dotenv import load_dotenv
-# from livekit.agents import (
-#     AutoSubscribe,
-#     JobContext,
-#     WorkerOptions,
-#     cli,
-# )
-
-# from livekit.agents.multimodal.multimodal_agent import EventTypes
-# from livekit.plugins import openai
 
 
 async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollector):
