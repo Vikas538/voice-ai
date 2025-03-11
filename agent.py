@@ -108,9 +108,15 @@ async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollect
             "content":log.content
         })
     # if len is > 0 call api 
+    print("BACKEND_URL",os.getenv("BACKEND_URL"))
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url="hhttps://dev-contactswing-fastapi-962560522883.us-central1.run.app/v2/save/conversations",json={"conversations":convsersations,"session_id":ctx.room.name,"llm_prompt_tokens":usage_summary.llm_prompt_tokens,"llm_completion_tokens":usage_summary.llm_completion_tokens,"tts_characters_count":usage_summary.tts_characters_count,"stt_audio_duration":usage_summary.stt_audio_duration}) as response:
+        async with session.post(url=f"{os.getenv('BACKEND_URL')}/save/conversations",json={"conversations":convsersations,"session_id":ctx.room.name,"usage_summary":{
+            "llm_prompt_tokens":usage_summary.llm_prompt_tokens,
+            "llm_completion_tokens":usage_summary.llm_completion_tokens,
+            "tts_characters_count":usage_summary.tts_characters_count,
+            "stt_audio_duration":usage_summary.stt_audio_duration
+        }}) as response:
             print(response)
     
     conversation_log.pop(ctx.room.name)
@@ -138,12 +144,12 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"starting voice assistant for participant {participant.identity}")
 
     config = await get_config_by_room_id(ctx.room.name)
-    print("config=======================>",config)
     config_json = json.loads(config)
     system_prompt = config_json.get("system_prompt", "")
     actions = config_json.get("actions", [])
+    print("actions=======================>",actions)
     kb_id = config_json.get("kb_id", "")
-    action_class = AssistantFnc()
+    action_class = AssistantFnc(actions=actions,kb_id=kb_id,session_id=ctx.room.name)
     initial_message = config_json.get("initial_message", "Hey, how can I help you today?")
     agent_config = config_json.get("agent", {})
     tts_config = config_json.get("synthesizer", {})
@@ -221,7 +227,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-             agent_name="voice_widget",
+             agent_name="voice_widget2",
              
         ),
     )

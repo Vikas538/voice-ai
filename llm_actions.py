@@ -1,214 +1,184 @@
 import json
-import redis
-from typing import Annotated,Callable
+from typing import Annotated
 from livekit.agents import llm
 import logging
 import aiohttp
-import types
-import functools
-import inspect
 from dataclasses import dataclass
+from datetime import datetime
+import os
+import re
 
 logger = logging.getLogger("llm_actions")
 
 
 
-def dynamic_ai_callable(*, name=None, description=None, auto_retry=False):
-    """Custom decorator that dynamically applies @llm.ai_callable()"""
-    
-    def decorator(f):
-        print(f"🔹 Wrapping function: {f.__name__}")
-        sig = inspect.signature(f)
-
-        # Apply @llm.ai_callable directly
-        @llm.ai_callable(name=name, description=description, auto_retry=auto_retry)
-        @functools.wraps(f)
-        async def wrapped(self, *args, **kwargs):
-            bound_args = sig.bind(self, *args, **kwargs)
-            bound_args.apply_defaults()
-
-            return await f(*bound_args.args, **bound_args.kwargs)
-
-        return wrapped
-
-    return decorator
-
-
-
-import types
-
-
-
-# class AssistantFnc(llm.FunctionContext):
-
-#     def __init__(self):
-#         super().__init__()
-#         self.register_function(self.get_weather,"get weather action id is 1234567890")
-
-
-
-#     def register_available_actions(self,actions:list,kb_id:str):
-#         """Dynamically register only the available actions in Redis."""
-#         print("actions===================>",actions)
-
-#         for action in actions:
-#             description = action.get("description") + "action id is " + action.get("id")
-#             if action.get("type") == "SEND_EMAIL":  
-#                 print("description===================>",description)
-#                 self.register_function(self.get_weather,"get weather action id is 1234567890")
-
-#             # if action.get("type") == "SEND_SMS":
-#             #     self.register_function(self.send_sms_action_by_openai,description)
-#             # if action.get("type") == "APPOINTMENT":
-#             #     self.register_function(AssistantFnc.create_appointment_action_openai)
-#             # if kb_id:
-#             #     self.register_function(AssistantFnc.search_in_kb_action_openai)
-
-        
-
-
-#     def register_function(self, func: Callable, description: str):
-#         func_name = func.__name__
-
-#         # Check if function is already registered
-#         if func_name in self.ai_functions:
-#             print(f"⚠️ Function '{func_name}' is already registered. Skipping re-registration.")
-#             return  # Prevent duplicate registration
-
-#         print(f"Registering function: {func_name}, description: {description}")
-
-#         _set_metadata(func, name=func_name, desc=description, auto_retry=True)
-
-#         self._register_ai_function(func)  # Registers with the AI system
-
-#         setattr(self, func_name, func)  # Dynamically attach function
-
-#         print(f"✅ Function '{func_name}' registered successfully!")
-
-
-    
-
-#     async def send_email(
-#         self,
-#         to_email: Annotated[str, llm.TypeInfo(description="Recipient email")],
-#         subject: Annotated[str, llm.TypeInfo(description="Email subject")],
-#         body: Annotated[str, llm.TypeInfo(description="Email body")],
-#         action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
-#     ):
-#         """Send an email to a specified recipient."""
-#         print("send_email==========================================>",to_email,subject,body,action_id)
-#         logger.info(f"Sending email to {to_email} with subject {subject}")
-#         return f"Email sent to {to_email} with subject: {subject}"
-    
-
-#     async def get_weather(
-#         self,
-#         # by using the Annotated type, arg description and type are available to the LLM
-#         location: Annotated[
-#             str, llm.TypeInfo(description="The location to get the weather for")
-#         ],
-#     ):
-#         """Called when the user asks about the weather. This function will return the weather for the given location."""
-#         logger.info(f"getting weather for {location}")
-#         url = f"https://wttr.in/{location}?format=%C+%t"
-#         async with aiohttp.ClientSession() as session:
-#             async with session.get(url) as response:
-#                 if response.status == 200:
-#                     weather_data = await response.text()
-#                     # response from the function call is returned to the LLM
-#                     # as a tool response. The LLM's response will include this data
-#                     return f"The weather in {location} is {weather_data}."
-#                 else:
-#                     raise f"Failed to get weather data, status code: {response.status}"
-
-#     @staticmethod
-#     async def send_sms_action_by_openai(
-#         to_number: Annotated[str, llm.TypeInfo(description="Recipient phone number")],
-#         message: Annotated[str, llm.TypeInfo(description="SMS body")],
-#         action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
-#     ):
-#         """Send an SMS message to a recipient."""
-#         logger.info(f"Sending SMS to {to_number}: {message}")
-#         return f"SMS sent to {to_number}: {message}"
-
-#     @staticmethod
-#     @llm.ai_callable()
-#     async def fetch_slots_action_openai(
-#         timezone: Annotated[str, llm.TypeInfo(description="Timezone for fetching slots")],
-#         block_date: Annotated[str, llm.TypeInfo(description="Date in YYYY-MM-DD format")],
-#         timedelta: Annotated[str, llm.TypeInfo(description="Time delta in days")],
-#         action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
-#     ):
-#         """Fetch available appointment slots based on provided details."""
-#         logger.info(f"Fetching slots for date {block_date} in {timezone} with delta {timedelta}")
-#         return f"Available slots for {block_date} in {timezone}: [10:00 AM, 2:00 PM, 4:00 PM]"
-
-#     @staticmethod
-#     async def create_appointment_action_openai(
-#         length: Annotated[str, llm.TypeInfo(description="Appointment length (15m, 30m, 45m, 1hr)")],
-#         nl_date_time: Annotated[str, llm.TypeInfo(description="Natural language date and time")],
-#         timezone: Annotated[str, llm.TypeInfo(description="Timezone of the appointment")],
-#         email: Annotated[str, llm.TypeInfo(description="Email to send confirmation")],
-#         title: Annotated[str, llm.TypeInfo(description="Title of the appointment")],
-#         description: Annotated[str, llm.TypeInfo(description="Description of the appointment")],
-#         action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
-#     ):
-#         """Book an appointment for the user based on the given details."""
-#         logger.info(f"Creating appointment '{title}' on {nl_date_time} for {email}")
-#         return f"Appointment '{title}' booked for {email} on {nl_date_time}"
-
-#     @staticmethod
-#     async def search_in_kb_action_openai(
-#         query: Annotated[str, llm.TypeInfo(description="User query for KB search")],
-#     ):
-#         """Search the internal knowledge base for relevant information."""
-#         logger.info(f"Searching KB for query: {query}")
-#         return f"KB search results for '{query}': [Relevant Info 1, Relevant Info 2]"
-
-
+from redis_utils import get_config_by_room_id
 
 class AssistantFnc(llm.FunctionContext):
-    # the llm.ai_callable decorator marks this function as a tool available to the LLM
+    def __init__(self,actions:list,kb_id:str,session_id:str):
+    # First decorate and set class methods
 
-    # by default, it'll use the docstring as the function's description
-    @llm.ai_callable(name="get_weather",description="get weather action id is 1234567890")
+        for action in actions:
+            # if action.get("type") == "SEND_EMAIL":
+            #     weather_func = llm.ai_callable(
+            #         name="get_weather", 
+            #         description="get weather action id is 1234567890"
+            #     )(self.get_weather.__func__)
+            #     self.__class__.get_weather = weather_func
+            if action.get("type") == "SEND_EMAIL":
+                email_func = llm.ai_callable(
+                    name="send_email",
+                    description=f"Send an email to the specified recipient action_id = {action.get('id')} and session_id = {session_id}"
+                )(self.send_email.__func__)
+                self.__class__.send_email = email_func
+            elif action.get("type") == "SEND_SMS":
+                sms_func = llm.ai_callable(
+                    name="send_sms",
+                    description=f"Send an SMS to the specified recipient action_id = {action.get('id')} and session_id = {session_id}"
+                )(self.send_sms.__func__)
+                self.__class__.send_sms = sms_func
+            elif action.get("type") == "APPOINTMENT":
+                appointment_func = llm.ai_callable(
+                    name="create_appointment",
+                    description=f"""If anyone asks for a meeting/appointment use this tool.make sure you have collected or know the email, date, time and timezone for booking using this appointment. 
+            
+            Note: You don't need to fetch the available slots to use this tool.
+            If this tool not able to book in the requested time, it will return the other available slots for booking.Today's date and time in America/new_york is {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} and action_id = {action.get('id')} and session_id = {session_id}"""
+                )(self.create_appointment.__func__)
+                self.__class__.create_appointment = appointment_func
+            elif action.get("type") == "SEARCH_KB":
+                search_kb_func = llm.ai_callable(
+                    name="search_kb",
+                    description=f"Search the internal knowledge base for relevant information kb_id = {kb_id} and session_id = {session_id}"
+                )(self.search_kb.__func__)
+                self.__class__.search_kb = search_kb_func
+
+
+        # Now call super().__init__() which will find and register our decorated methods
+        super().__init__()
+    
+    # def register_functions(self):
+    #     # Register get_weather function
+    #     weather_func = llm.ai_callable(
+    #         name="get_weather", 
+    #         description="get weather action id is 1234567890"
+    #     )(self.get_weather.__func__)
+
+    #     self.__class__.get_weather = weather_func
+
+        
+    #     # Register send_email function
+    #     email_func = llm.ai_callable(
+    #         name="send_email",
+    #         description="Send an email to the specified recipient"
+    #     )(self.send_email.__func__)
+
+    #     self.__class__.send_email = email_func
+
+        
+        # No need to return anything - the functions are registered in the parent class
+
+    async def send_action_request(self,body:dict):
+        config = await get_config_by_room_id(body.get("session_id"))
+        config_json = json.loads(config)
+        auth_key = config_json.get("auth_key")
+        url = os.getenv("BACKEND_URL")
+        if body.get("action_type") == "SEND_EMAIL":
+            url = f"{url}/send-grid/send-email?assistant_id={config_json.get('assistant_id')}&action_id={body.get('action_id')}"
+        elif body.get("action_type") == "SEND_SMS":
+            url = f"{url}/external/send/sms?assistant_id={config_json.get('assistant_id')}&action_id={body.get('action_id')}"
+        elif body.get("action_type") == "APPOINTMENT":
+            url = f"{url}/integration/calendar_natural_language/block?assistant_id={config_json.get('assistant_id')}&action_id={body.get('action_id')}"
+        print(url)
+        print(body)
+        headers = {"Authorization":f"{auth_key}","Content-Type":"application/json"}
+        print(config_json.get("assistant_id"),config_json.get("auth_key"))
+        request_body = {**body,"assistant_id":config_json.get("assistant_id")}
+        print(request_body)
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url=url,json=request_body,headers=headers) as response:
+                return await response.json()
+
     async def get_weather(
         self,
-        # by using the Annotated type, arg description and type are available to the LLM
-        location: Annotated[
-            str, llm.TypeInfo(description="The location to get the weather for")
-        ],
+        location: Annotated[str, llm.TypeInfo(description="The location to get the weather for")],
         action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
     ):
-        print("action_id==================================================>",action_id)
         """Called when the user asks about the weather. This function will return the weather for the given location."""
-        logger.info(f"getting weather for {location}")
-        url = f"https://wttr.in/{location}?format=%C+%t"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    weather_data = await response.text()
-                    # response from the function call is returned to the LLM
-                    # as a tool response. The LLM's response will include this data
-                    return f"The weather in {location} is {weather_data}."
-                else:
-                    raise f"Failed to get weather data, status code: {response.status}"
+        print("action_id==================================================>", action_id)
+        # Rest of your implementation...
                 
-    @llm.ai_callable()
     async def send_email(
         self,
-        # by using the Annotated type, arg description and type are available to the LLM
-        to_email: Annotated[
-            str, llm.TypeInfo(description="Recipient email")
-        ],
+        to_email: Annotated[str, llm.TypeInfo(description="Recipient email")],
         subject: Annotated[str, llm.TypeInfo(description="Email subject")],
         body: Annotated[str, llm.TypeInfo(description="Email body")],
         action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
+        session_id: Annotated[str, llm.TypeInfo(description="Session ID")],
     ):
-        """Called when the user asks about the weather. This function will return the weather for the given location."""
-        logger.info(f"------------------------------------------------------->sending email to {to_email} with subject {subject} and body {body} and action id is {action_id}")
-        return f"Email sent to {to_email} with subject: {subject}"
-
+        """Called when the user asks to send an email."""
+        logger.info(f"------------------------------------------------------->sending email to {to_email} and session_id = {session_id} and action_id = {action_id}")
+        body = {
+            "action_type":"SEND_EMAIL",
+            "to_email":to_email,
+            "subject":subject,
+            "body":body,
+            "action_id":action_id,
+            "session_id":session_id
+        }
+        result = await self.send_action_request(body)
+        print(result)
+        return f"result: {json.dumps(result)}"
+    
+    async def send_sms(
+        self,
+        to_number: Annotated[str, llm.TypeInfo(description="Recipient phone number")],
+        message: Annotated[str, llm.TypeInfo(description="SMS body")],
+        action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
+        session_id: Annotated[str, llm.TypeInfo(description="Session ID")],
+    ):
+        """Called when the user asks to send an SMS."""
+        logger.info(f"------------------------------------------------------->sending sms to {to_number} and session_id = {session_id} and action_id = {action_id}")
+        body = {
+            "action_type":"SEND_SMS",
+            "to_number":"+"+re.sub(r"\D", "", to_number),
+            "message_body":message,
+            "action_id":action_id,
+            "session_id":session_id
+        }
+        result = await self.send_action_request(body)
+        print(result)
+        return f"result: {json.dumps(result)}"
+    
+    async def create_appointment(
+        self,
+        length: Annotated[str, llm.TypeInfo(description="Appointment length (15m, 30m, 45m, 1hr)")],
+        nl_date_time: Annotated[str, llm.TypeInfo(description="""It is the Date and time at which the appointment has to be booked. You can send any specific Date(in formal MM-DD-YYYY) with time or yesterday/today strings with time. Example. "tomorrow 10:30 AM","today 10:30 PM", "10-01-2025 10:30 AM",etc.""")],
+        timezone: Annotated[str, llm.TypeInfo(description="""timezone to book an appointment. Example: IST "Asia/Kolkata", PST "America/Los_Angeles" CST = "America/Chicago" EST = "America/New_York" """)],
+        email: Annotated[str, llm.TypeInfo(description="Email to send confirmation")],
+        title: Annotated[str, llm.TypeInfo(description="Title of the appointment")],
+        description: Annotated[str, llm.TypeInfo(description="Description of the appointment")],
+        action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
+        session_id: Annotated[str, llm.TypeInfo(description="Session ID")],
+    ):
+        """Called when the user asks to create an appointment."""
+        logger.info(f"------------------------------------------------------->creating appointment and session_id = {session_id} and action_id = {action_id}")
+        body = {
+            "action_type":"APPOINTMENT",
+            "length":length,
+            "nl_date_time":nl_date_time,
+            "timezone":timezone,
+            "email":email,
+            "title":title,
+            "description":description,
+            "action_id":action_id,
+            "session_id":session_id
+        }
+        result = await self.send_action_request(body)
+        print(result)
+        return f"result: {json.dumps(result)}"
+    
+    
 # fnc_ctx = AssistantFnc()
 
 
