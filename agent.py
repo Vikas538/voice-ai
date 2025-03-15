@@ -12,7 +12,7 @@ from livekit.agents import (
     metrics,
 )
 from livekit.agents.pipeline import VoicePipelineAgent
-from livekit.plugins import cartesia, openai, deepgram, silero, turn_detector,azure,google,playai,elevenlabs
+from livekit.plugins import cartesia, openai, deepgram, silero, turn_detector,azure,google,playai,elevenlabs,speechmatics
 from redis_utils import get_config_by_room_id
 import os,json
 conversation_log = {}
@@ -62,8 +62,11 @@ def get_stt_class(model_name:str,api_key:str):
         return openai.STT.with_groq(model="whisper-large-v3", language="en",api_key=api_key)
     elif model_name == "azure":
         return azure.STT(speech_key=api_key,speech_region="centralus")
+    elif model_name == "speechmatics":
+        return speechmatics.STT(connection_settings=speechmatics.ConnectionSettings(url="wss://eu2.rt.speechmatics.com/v2",api_key=api_key))
     
 def get_tts_class(model_name:str,voice_config:dict):
+    print("model_name",model_name)
     if model_name == "azure":
         return azure.TTS(speech_key=voice_config.get("api_key"),speech_region="centralus")
     elif model_name == "cartesia":
@@ -73,17 +76,11 @@ def get_tts_class(model_name:str,voice_config:dict):
     elif model_name == "elevenlabs":
         return elevenlabs.tts.TTS(
     model="eleven_turbo_v2_5",
+    api_key=voice_config.get("api_key"),
     voice=elevenlabs.tts.Voice(
-        id="EXAVITQu4vr4xnSDxMaL",
-        name="Bella",
-        api_key=voice_config.get("api_key"),
-        category="premade",
-        settings=elevenlabs.tts.VoiceSettings(
-            stability=0.71,
-            similarity_boost=0.5,
-            style=0.0,
-            use_speaker_boost=True
-        ),
+        id=voice_config.get("voice_id"),
+        name="jessica",
+        category="premade"
     ),
     language="en",
     streaming_latency=3,
