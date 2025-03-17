@@ -125,7 +125,7 @@ async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollect
 
 
 async def entrypoint(ctx: JobContext):
-    print(ctx.room)
+    print(ctx.job)
 
     # fnc_ctx = action_class.register_available_actions(actions=actions,kb_id=kb_id)
 
@@ -135,9 +135,20 @@ async def entrypoint(ctx: JobContext):
 
     logger.info(f"connecting to room {ctx.room.name}")
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-
-    # Wait for the first participant to connect
     participant = await ctx.wait_for_participant()
+
+    if ctx.room.name and ctx.room.name.startswith("call_"):
+        call_details = participant.attributes
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url=f"{os.getenv('BACKEND_URL')}/voice/inbound",json={"call_details":call_details,"call_details":{**call_details}}) as response:
+                print(response)
+                response = await response.json()
+                session_id = response.get("data",{}).get("session_id")
+                
+    else:
+        session_id = ctx.room.name
+    # Wait for the first participant to connect
+    print("participant=======================>",participant.attributes)
     logger.info(f"starting voice assistant for participant {participant.identity}")
 
     config = await get_config_by_room_id(ctx.room.name)
@@ -146,7 +157,7 @@ async def entrypoint(ctx: JobContext):
     actions = config_json.get("actions", [])
     print("actions=======================>",actions)
     kb_id = config_json.get("kb_id", "")
-    action_class = AssistantFnc(actions=actions,kb_id=kb_id,session_id=ctx.room.name)
+    action_class = AssistantFnc(actions=actions,kb_id=kb_id,session_id=session_id)
     initial_message = config_json.get("initial_message", "Hey, how can I help you today?")
     agent_config = config_json.get("agent", {})
     tts_config = config_json.get("synthesizer", {})
