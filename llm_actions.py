@@ -6,6 +6,7 @@ import aiohttp
 from dataclasses import dataclass
 from datetime import datetime
 import os
+from kb_search import similarity_search_with_score
 import re
 
 logger = logging.getLogger("llm_actions")
@@ -46,7 +47,7 @@ class AssistantFnc(llm.FunctionContext):
             If this tool not able to book in the requested time, it will return the other available slots for booking.Today's date and time in America/new_york is {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} and action_id = {action.get('id')} and session_id = {session_id}"""
                 )(self.create_appointment.__func__)
                 self.__class__.create_appointment = appointment_func
-            elif action.get("type") == "SEARCH_KB":
+            if kb_id:
                 search_kb_func = llm.ai_callable(
                     name="search_kb",
                     description=f"Search the internal knowledge base for relevant information kb_id = {kb_id} and session_id = {session_id}"
@@ -57,26 +58,7 @@ class AssistantFnc(llm.FunctionContext):
         # Now call super().__init__() which will find and register our decorated methods
         super().__init__()
     
-    # def register_functions(self):
-    #     # Register get_weather function
-    #     weather_func = llm.ai_callable(
-    #         name="get_weather", 
-    #         description="get weather action id is 1234567890"
-    #     )(self.get_weather.__func__)
 
-    #     self.__class__.get_weather = weather_func
-
-        
-    #     # Register send_email function
-    #     email_func = llm.ai_callable(
-    #         name="send_email",
-    #         description="Send an email to the specified recipient"
-    #     )(self.send_email.__func__)
-
-    #     self.__class__.send_email = email_func
-
-        
-        # No need to return anything - the functions are registered in the parent class
 
     async def send_action_request(self,body:dict):
         config = await get_config_by_room_id(body.get("session_id"))
@@ -177,6 +159,36 @@ class AssistantFnc(llm.FunctionContext):
         result = await self.send_action_request(body)
         print(result)
         return f"result: {json.dumps(result)}"
+    
+    async def search_kb(
+        self,
+        query: Annotated[str, llm.TypeInfo(description="Query to search the knowledge base")],
+        kb_id: Annotated[str, llm.TypeInfo(description="Knowledge base ID")],
+    ):  
+        """Called when the user asks to search the knowledge base."""
+        logger.info(f"------------------------------------------------------->searching knowledge base and kb_id = {kb_id}")
+        try:
+    
+            docs_with_scores = await similarity_search_with_score(query,{"kb_id":kb_id})
+            docs_with_scores_str = "\n\n".join(
+                [
+                    "File source is : "
+                    + "gs://" + doc[0].metadata.get("file_id", "Unknown Source")+ "\n\n [content]"
+                    + f" (Confidence: {doc[1]})\n"
+                    + doc[0].page_content.replace("\n", "\n")
+                    for doc in docs_with_scores
+                ]
+            )
+            vector_db_result = (
+                f"Found {len(docs_with_scores)} similar documents:\n{docs_with_scores_str}"
+            )
+            print(vector_db_result)
+            return {
+                "data":vector_db_result,
+                "file_id":None
+            }
+        except Exception as e:
+            return {"message": str(e)}, 500
     
     
 # fnc_ctx = AssistantFnc()

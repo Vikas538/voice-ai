@@ -166,6 +166,7 @@ async def entrypoint(ctx: JobContext):
     llm_class = get_llm_class_by_model_name(agent_config.get("model"),config_json.get("api_key"))
     stt_class = get_stt_class(stt_config.get("model"),stt_config.get('api_key'))
     tts_class = get_tts_class(tts_config.get("model"),tts_config)
+    print("===================>system prompt",system_prompt)
     initial_ctx = llm.ChatContext().append(
         role="system",
             text=system_prompt,
@@ -236,7 +237,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-             agent_name="voice_widget",
+             agent_name="voice_widget3",
              
         ),
     )
