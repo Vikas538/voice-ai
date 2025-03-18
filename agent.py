@@ -137,12 +137,13 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     participant = await ctx.wait_for_participant()
 
-    if ctx.room.name and ctx.room.name.startswith("call_"):
+    if ctx.room.name and ctx.room.name.startswith("call-"):
         call_details = participant.attributes
         async with aiohttp.ClientSession() as session:
-            async with session.post(url=f"{os.getenv('BACKEND_URL')}/voice/inbound",json={"call_details":call_details,"call_details":{**call_details}}) as response:
+            async with session.post(url=f"{os.getenv('BACKEND_URL')}/voice/inbound",json={"from_number":call_details.get("sip.phoneNumber"),"to_number":call_details.get("sip.trunkPhoneNumber"),"call_sid":call_details.get("sip.twilio.callSid")}) as response:
                 print(response)
                 response = await response.json()
+                print("response=======================>",response)
                 session_id = response.get("data",{}).get("session_id")
                 
     else:
@@ -151,7 +152,7 @@ async def entrypoint(ctx: JobContext):
     print("participant=======================>",participant.attributes)
     logger.info(f"starting voice assistant for participant {participant.identity}")
 
-    config = await get_config_by_room_id(ctx.room.name)
+    config = await get_config_by_room_id(session_id)
     config_json = json.loads(config)
     system_prompt = config_json.get("system_prompt", "")
     actions = config_json.get("actions", [])
