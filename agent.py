@@ -1,5 +1,5 @@
 import logging
-from redis.asyncio import Redis
+
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -15,19 +15,14 @@ from livekit.agents.pipeline import VoicePipelineAgent
 from livekit.plugins import cartesia, openai, deepgram, silero, turn_detector,azure,google,playai,elevenlabs,speechmatics
 from redis_utils import get_config_by_room_id
 import os,json
-conversation_log = {}
+from glocal_vaiables import conversation_log,ctx_agents
 
 
 import aiohttp
-from typing import Annotated
-
-from livekit.agents import llm
-from livekit.agents.pipeline import VoicePipelineAgent
-from livekit.agents.multimodal import MultimodalAgent
-from livekit.agents.llm import ChatMessage
+import os
 
 from llm_actions import AssistantFnc
-
+from livekit.agents.llm import ChatMessage
 
 
 
@@ -92,6 +87,7 @@ def get_tts_class(model_name:str,voice_config:dict):
 
 async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollector):
     print("====================================>shutdown",ctx)
+    return
     usage_summary = usage_collector.get_summary()
     print(ctx.room.name)
     convsersations = []
@@ -125,7 +121,8 @@ async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollect
 
 
 async def entrypoint(ctx: JobContext):
-    print(ctx.job)
+    print("====================================>ctx.job",ctx.job.metadata)
+    
 
     # fnc_ctx = action_class.register_available_actions(actions=actions,kb_id=kb_id)
 
@@ -158,7 +155,7 @@ async def entrypoint(ctx: JobContext):
     actions = config_json.get("actions", [])
     print("actions=======================>",actions)
     kb_id = config_json.get("kb_id", "")
-    action_class = AssistantFnc(actions=actions,kb_id=kb_id,session_id=session_id)
+    action_class = AssistantFnc(actions=actions,kb_id=kb_id,session_id=session_id,ctx=ctx)
     initial_message = config_json.get("initial_message", "Hey, how can I help you today?")
     agent_config = config_json.get("agent", {})
     tts_config = config_json.get("synthesizer", {})
@@ -166,11 +163,20 @@ async def entrypoint(ctx: JobContext):
     llm_class = get_llm_class_by_model_name(agent_config.get("model"),config_json.get("api_key"))
     stt_class = get_stt_class(stt_config.get("model"),stt_config.get('api_key'))
     tts_class = get_tts_class(tts_config.get("model"),tts_config)
-    print("===================>system prompt",system_prompt)
-    initial_ctx = llm.ChatContext().append(
-        role="system",
+    metadata = json.loads(ctx.job.metadata)
+    print("====================================>metadata",metadata)
+    if metadata.get("change_assistant"):
+        print("====================================>conversation_log",metadata.get('conversation_log'))
+        print("====================================>ctx.room.name",ctx.room.name)
+        initial_ctx = llm.ChatContext().append(
+            role="system",
+            text=f"You are a helpful assistant. You are currently in a conversation with a user. Tranferred to you from another agent. The conversation log is as follows: {json.dumps(metadata.get('conversation_log'))} you need to continue the conversation with the user. And you are a sales agent for telsa only talk about tesla and its products",
+        )
+    else:
+        initial_ctx = llm.ChatContext().append(
+            role="system",
             text=system_prompt,
-    )
+        )
 
     # This project is configured to use Deepgram STT, OpenAI LLM and Cartesia TTS plugins
     # Other great providers exist like Cerebras, ElevenLabs, Groq, Play.ht, Rime, and more
@@ -195,7 +201,7 @@ async def entrypoint(ctx: JobContext):
 
 
     usage_collector = metrics.UsageCollector()
-    ctx._shutdown_callbacks.append(lambda reason: shutdown_callback(ctx, usage_collector))
+    ctx.add_shutdown_callback(lambda reason: shutdown_callback(ctx, usage_collector))
 
     @agent.on("metrics_collected")
     def on_metrics_collected(agent_metrics: metrics.AgentMetrics):
@@ -220,11 +226,26 @@ async def entrypoint(ctx: JobContext):
             conversation_log[ctx.room.name] = []
         conversation_log[ctx.room.name].append(agent_msg)
 
+    @ctx.room.on("participant_disconnected")
+    def on_participant_disconnected(participant):
+        print("====================================>participant_disconnected",participant)
+        print(f"Participant disconnected: {participant.identity}")
+
 
 
     agent.start(ctx.room, participant)
 
     # The agent should be polite and greet the user when it joins :)
+    global ctx_agents
+    ctx_agents[session_id] = {
+        "ctx":ctx,
+        "agent":agent,
+        "stt":stt_class,
+        "tts":tts_class,
+        "llm":llm_class
+    }
+
+    print("====================================>session_id",session_id,ctx_agents)
     await agent.say(initial_message, allow_interruptions=True)
 
 
@@ -237,7 +258,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-             agent_name="voice_widget",
+             agent_name="voice_widget2",
              
         ),
     )

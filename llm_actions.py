@@ -8,6 +8,11 @@ from datetime import datetime
 import os
 from kb_search import similarity_search_with_score
 import re
+from livekit.agents.pipeline import VoicePipelineAgent
+from livekit.agents import (
+    JobContext,
+)
+import asyncio
 
 logger = logging.getLogger("llm_actions")
 
@@ -16,7 +21,7 @@ logger = logging.getLogger("llm_actions")
 from redis_utils import get_config_by_room_id
 
 class AssistantFnc(llm.FunctionContext):
-    def __init__(self,actions:list,kb_id:str,session_id:str):
+    def __init__(self,actions:list,kb_id:str,session_id:str,ctx:JobContext):
     # First decorate and set class methods
 
         for action in actions:
@@ -53,6 +58,20 @@ class AssistantFnc(llm.FunctionContext):
                     description=f"Search the internal knowledge base for relevant information kb_id = {kb_id} and session_id = {session_id}"
                 )(self.search_kb.__func__)
                 self.__class__.search_kb = search_kb_func
+            if True:
+                transfer_to_agent_func = llm.ai_callable(
+                    name="transfer_to_agent",
+                    description=f"Transfer the conversation to the specified agent agent_id = {22} and session_id = {session_id}"
+                )(self.transfer_to_agent.__func__)
+                self.__class__.transfer_to_agent = transfer_to_agent_func
+            
+            if True:
+                close_call_func = llm.ai_callable(
+                    name="close_call",
+                    description=f"Close the call and session_id = {session_id}"
+                )(self.close_call.__func__)
+                self.__class__.close_call = close_call_func
+
 
 
         # Now call super().__init__() which will find and register our decorated methods
@@ -189,6 +208,70 @@ class AssistantFnc(llm.FunctionContext):
             }
         except Exception as e:
             return {"message": str(e)}, 500
+        
+    async def transfer_to_agent(
+        self,
+        agent_id: Annotated[str, llm.TypeInfo(description="Agent ID")],
+        session_id: Annotated[str, llm.TypeInfo(description="Session ID")],
+    ):
+        """Called when the user asks to transfer to another agent."""
+        logger.info(f"------------------------------------------------------->transferring to agent and session_id = {session_id}")
+        from glocal_vaiables import ctx_agents
+        session_context = ctx_agents.get(session_id)
+        current_ctx = session_context["ctx"]
+        current_agent = session_context["agent"]
+        from glocal_vaiables import conversation_log
+        from agent import turn_detector
+        convsersations = []
+        for log in conversation_log.get(current_ctx.room.name):
+            convsersations.append({
+                "role":log.role,
+                "content":log.content
+            })
+        
+        system_prompt = f"""
+        You are a helpful assistant.
+        You are currently in a conversation with a user.
+        Tranferred to you from another agent.
+        The conversation log is as follows:
+        {json.dumps(convsersations)}
+
+        You need to continue the conversation with the user.
+        u are only about to talk about telsa to the user.
+        You need to answer and continue the conversation with the user.
+        You need to use the same language as the user.
+        You need to use the same tone as the user.
+        You need to use the same style as the user.
+        You need to use the same format as the user.
+        """
+
+        from livekit.api import LiveKitAPI, CreateAgentDispatchRequest
+
+        lkapi = LiveKitAPI(
+                url=os.getenv("LIVEKIT_URL"),
+                api_key=os.getenv("LIVEKIT_API_KEY"),
+                api_secret=os.getenv("LIVEKIT_API_SECRET")
+            )
+
+        await lkapi.agent_dispatch.create_dispatch(
+                    CreateAgentDispatchRequest(
+                        agent_name="voice_widget2", room=session_id, metadata=json.dumps({"change_assistant":True,"conversation_log":json.dumps(convsersations)})
+                    )
+                )
+
+        current_ctx.shutdown(reason="agent_transferred")
+
+        # print("====================================>new_agent",new_agent)
+        # asyncio.create_task(current_ctx.say("transferred you to our telsa expert", allow_interruptions=True))
+        # new_agent.start(current_ctx.room, current_ctx.participant)
+
+    async def close_call(self,session_id:Annotated[str, llm.TypeInfo(description="Session ID")]):
+        """Called when the user asks to close the call."""
+        logger.info(f"------------------------------------------------------->closing call and session_id = {session_id}")
+        from glocal_vaiables import ctx_agents
+        session_context = ctx_agents.get(session_id)
+        current_ctx:JobContext = session_context["ctx"]
+        await current_ctx.api.delete_room(current_ctx.api.DeleteRoomRequest(room_name=session_id))
     
     
 # fnc_ctx = AssistantFnc()
