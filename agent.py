@@ -86,8 +86,6 @@ def get_tts_class(model_name:str,voice_config:dict):
 
 
 async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollector):
-    print("====================================>shutdown",ctx)
-    return
     usage_summary = usage_collector.get_summary()
     print(ctx.room.name)
     convsersations = []
