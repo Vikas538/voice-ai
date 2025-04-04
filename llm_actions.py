@@ -66,12 +66,12 @@ class AssistantFnc(llm.FunctionContext):
                 )(self.transfer_to_agent.__func__)
                 self.__class__.transfer_to_agent = transfer_to_agent_func
             
-            # if True:
-            #     close_call_func = llm.ai_callable(
-            #         name="close_call",
-            #         description=f"Close the call and session_id = {session_id}"
-            #     )(self.close_call.__func__)
-            #     self.__class__.close_call = close_call_func
+
+            close_call_func = llm.ai_callable(
+                name="close_call",
+                description=f"Close the call and session_id = {session_id} , should be only used if the idle time is more of user want to close the call"
+            )(self.close_call.__func__)
+            self.__class__.close_call = close_call_func
 
 
 
@@ -222,7 +222,6 @@ class AssistantFnc(llm.FunctionContext):
         current_ctx = session_context["ctx"]
         current_agent = session_context["agent"]
         from glocal_vaiables import conversation_log
-        from agent import turn_detector
         convsersations = []
         for log in conversation_log.get(current_ctx.room.name):
             convsersations.append({
@@ -230,21 +229,6 @@ class AssistantFnc(llm.FunctionContext):
                 "content":log.content
             })
         
-        system_prompt = f"""
-        You are a helpful assistant.
-        You are currently in a conversation with a user.
-        Tranferred to you from another agent.
-        The conversation log is as follows:
-        {json.dumps(convsersations)}
-
-        You need to continue the conversation with the user.
-        u are only about to talk about telsa to the user.
-        You need to answer and continue the conversation with the user.
-        You need to use the same language as the user.
-        You need to use the same tone as the user.
-        You need to use the same style as the user.
-        You need to use the same format as the user.
-        """
 
         from livekit.api import LiveKitAPI, CreateAgentDispatchRequest
 

@@ -156,11 +156,12 @@ async def entrypoint(ctx: JobContext):
     assistant_config = agent_config.get(str(assistant_id), {})
     system_prompt = assistant_config.get("system_prompt", "")
     support_agents = config_json.get("support_agents", []) or None
-    support_agent_transfer_prompt = " "
+    support_agent_transfer_prompt = ""
     if support_agents:
-        print("====================================>support_agents",support_agents)
         for agent in support_agents:
-            print("====================================>agent",agent)
+            print("====================================>agent",agent,assistant_id)
+            if str(agent.get("assistant_id")) == assistant_id:
+                continue
             support_agent_transfer_prompt += "\n\n " + (
             f'When a user asks {agent["trigger"]},\n'
             f'"say {agent["transfer_text"]}"'
