@@ -1,0 +1,86 @@
+name: Deploy to Google Cloud Storage
+
+on:
+  push:
+    branches:
+      - dev
+      - staging
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_BUILD_DEPLOY_RUN }}
+
+    - name: Set up gcloud
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        version: 'latest'
+
+    - name: Configure Docker to use gcloud as a credential helper
+      run: |
+        gcloud auth list
+        gcloud auth configure-docker
+        docker-credential-gcloud configure-docker
+
+    - name: Build Docker Image (optional)
+      run: |
+        IMAGE_TAG=$(echo $GITHUB_REF | sed 's/refs\/heads\///') # Remove refs/heads/ prefix
+        docker build -t us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest .
+      env:
+        GOOGLE_CLOUD_PROJECT: neural-medium-374916
+        IMAGE_NAME: contactswing-fastapi
+        TAG: latest
+
+    - name: Push Docker Image to Artifact Registry (optional)
+      run: |
+        IMAGE_TAG=$(echo $GITHUB_REF | sed 's/refs\/heads\///') # Remove refs/heads/ prefix
+        docker push us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest
+      env:
+        GOOGLE_CLOUD_PROJECT: neural-medium-374916
+        IMAGE_NAME: contactswing-fastapi
+        TAG: latest
+
+    - name: Deploy dev branch code to Cloud Run dev Environment
+      if: github.ref == 'refs/heads/dev'
+      run: |
+          IMAGE_TAG=dev
+          gcloud run deploy dev-contactswing-fastapi \
+            --image us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest \
+            --region us-central1 \
+            --allow-unauthenticated \
+            --port 3000
+
+    - name: Deploy staging branch code to Cloud Run TEST Environment
+      if: github.ref == 'refs/heads/staging'
+      run: |
+          IMAGE_TAG=staging
+          gcloud run deploy test-contactswing-fastapi \
+            --image us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest \
+            --region us-central1 \
+            --allow-unauthenticated \
+            --port 3000
+
+    - name: Deploy master branch code to Cloud Run PROD Environment
+      if: github.ref == 'refs/heads/master'
+      run: |
+          IMAGE_TAG=master
+          gcloud run deploy prod-contactswing-fastapi \
+            --image us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest \
+            --region us-central1 \
+            --allow-unauthenticated \
+            --port 3000
