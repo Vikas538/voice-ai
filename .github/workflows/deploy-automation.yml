@@ -24,7 +24,7 @@ jobs:
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
       with:
-        credentials_json: ${{ secrets.GCP_BUILD_DEPLOY_RUN }}
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
 
     - name: Set up gcloud
       uses: google-github-actions/setup-gcloud@v2
@@ -33,54 +33,45 @@ jobs:
 
     - name: Configure Docker to use gcloud as a credential helper
       run: |
-        gcloud auth list
         gcloud auth configure-docker
-        docker-credential-gcloud configure-docker
-
-    - name: Build Docker Image (optional)
+    - name: Set deployment info
+      id: set_deployment_info
       run: |
-        IMAGE_TAG=$(echo $GITHUB_REF | sed 's/refs\/heads\///') # Remove refs/heads/ prefix
-        docker build -t us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest .
-      env:
-        GOOGLE_CLOUD_PROJECT: neural-medium-374916
-        IMAGE_NAME: contactswing-fastapi
-        TAG: latest
-
-    - name: Push Docker Image to Artifact Registry (optional)
+        echo "DEPLOY_TYPE=${{ github.event.inputs.deploy_type }}" >> $GITHUB_ENV
+        echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+        if [ -n "${{ github.event.inputs.custom_tag }}" ]; then
+          echo "TAG=${{ github.event.inputs.custom_tag }}" >> $GITHUB_ENV
+        else
+          echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        fi
+    - name: Build and push Backend Docker image
       run: |
-        IMAGE_TAG=$(echo $GITHUB_REF | sed 's/refs\/heads\///') # Remove refs/heads/ prefix
-        docker push us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest
-      env:
-        GOOGLE_CLOUD_PROJECT: neural-medium-374916
-        IMAGE_NAME: contactswing-fastapi
-        TAG: latest
-
-    - name: Deploy dev branch code to Cloud Run dev Environment
-      if: github.ref == 'refs/heads/dev'
+        docker build -t us.gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/livekit-agent:latest -f Dockerfile .
+        docker push us.gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/livekit-agent:latest
+    - name: Build and push Frontend Docker image
       run: |
-          IMAGE_TAG=dev
-          gcloud run deploy dev-contactswing-fastapi \
-            --image us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest \
-            --region us-central1 \
-            --allow-unauthenticated \
-            --port 3000
-
-    - name: Deploy staging branch code to Cloud Run TEST Environment
-      if: github.ref == 'refs/heads/staging'
-      run: |
-          IMAGE_TAG=staging
-          gcloud run deploy test-contactswing-fastapi \
-            --image us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest \
-            --region us-central1 \
-            --allow-unauthenticated \
-            --port 3000
-
-    - name: Deploy master branch code to Cloud Run PROD Environment
-      if: github.ref == 'refs/heads/master'
-      run: |
-          IMAGE_TAG=master
-          gcloud run deploy prod-contactswing-fastapi \
-            --image us.gcr.io/neural-medium-374916/contactswing-fastapi:${IMAGE_TAG}_latest \
-            --region us-central1 \
-            --allow-unauthenticated \
-            --port 3000
+        docker build -t us.gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/livekit-agent:latest -f Dockerfile .
+        docker push us.gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/livekit-agent:latest
+    - name: SSH into VM and deploy
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ env.INSTANCE_IP }}
+        username: ${{ env.SSH_USER }}
+        key: |
+         -----BEGIN OPENSSH PRIVATE KEY-----
+         b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+         QyNTUxOQAAACD8+CtyqitTXOMFOKPvRXmrKQhRIsEb+NaCWK9xFFwBGwAAAJjEIf/yxCH/
+         8gAAAAtzc2gtZWQyNTUxOQAAACD8+CtyqitTXOMFOKPvRXmrKQhRIsEb+NaCWK9xFFwBGw
+         AAAECjCoeULHPOVmeOal4FkdZZmEzyWV4vWaxLvxHPke4xXfz4K3KqK1Nc4wU4o+9Feasp
+         CFEiwRv41oJYr3EUXAEbAAAAFW12aWthc3JlZGR5QGdtYWlsLmNvbQ==
+         -----END OPENSSH PRIVATE KEY-----
+        script: |
+          echo "Stopping and removing old containers..."
+          docker stop livekit-agent-container || true
+          docker rm livekit-agent-container || true
+          
+          
+          echo "Deploying backend..."
+          docker run --env-file ~/workflows/.env -p 3000:80 --name livekit-agent-container -d us.gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/livekit-agent:latest
+          
+          echo "Deployment complete!"
