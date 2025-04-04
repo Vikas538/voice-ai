@@ -21,8 +21,9 @@ logger = logging.getLogger("llm_actions")
 from redis_utils import get_config_by_room_id
 
 class AssistantFnc(llm.FunctionContext):
-    def __init__(self,actions:list,kb_id:str,session_id:str,ctx:JobContext):
+    def __init__(self,actions:list,kb_id:str,session_id:str,ctx:JobContext,support_agents:list):
     # First decorate and set class methods
+        print("====================================>support_agents",support_agents)
 
         for action in actions:
             # if action.get("type") == "SEND_EMAIL":
@@ -58,19 +59,19 @@ class AssistantFnc(llm.FunctionContext):
                     description=f"Search the internal knowledge base for relevant information kb_id = {kb_id} and session_id = {session_id}"
                 )(self.search_kb.__func__)
                 self.__class__.search_kb = search_kb_func
-            if True:
+            if support_agents:
                 transfer_to_agent_func = llm.ai_callable(
                     name="transfer_to_agent",
                     description=f"Transfer the conversation to the specified agent agent_id = {22} and session_id = {session_id}"
                 )(self.transfer_to_agent.__func__)
                 self.__class__.transfer_to_agent = transfer_to_agent_func
             
-            if True:
-                close_call_func = llm.ai_callable(
-                    name="close_call",
-                    description=f"Close the call and session_id = {session_id}"
-                )(self.close_call.__func__)
-                self.__class__.close_call = close_call_func
+            # if True:
+            #     close_call_func = llm.ai_callable(
+            #         name="close_call",
+            #         description=f"Close the call and session_id = {session_id}"
+            #     )(self.close_call.__func__)
+            #     self.__class__.close_call = close_call_func
 
 
 
@@ -215,7 +216,7 @@ class AssistantFnc(llm.FunctionContext):
         session_id: Annotated[str, llm.TypeInfo(description="Session ID")],
     ):
         """Called when the user asks to transfer to another agent."""
-        logger.info(f"------------------------------------------------------->transferring to agent and session_id = {session_id}")
+        logger.info(f"------------------------------------------------------->transferring to agent and session_id = {session_id} ,agent_id = {agent_id}")
         from glocal_vaiables import ctx_agents
         session_context = ctx_agents.get(session_id)
         current_ctx = session_context["ctx"]
@@ -255,7 +256,7 @@ class AssistantFnc(llm.FunctionContext):
 
         await lkapi.agent_dispatch.create_dispatch(
                     CreateAgentDispatchRequest(
-                        agent_name="voice_widget2", room=session_id, metadata=json.dumps({"change_assistant":True,"conversation_log":json.dumps(convsersations)})
+                        agent_name="voice_widget3", room=session_id, metadata=json.dumps({"change_assistant":True,"conversation_log":json.dumps(convsersations),"assistant_id":agent_id,"session_id":session_id})
                     )
                 )
 

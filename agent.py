@@ -86,6 +86,7 @@ def get_tts_class(model_name:str,voice_config:dict):
 
 
 async def shutdown_callback(ctx: JobContext,usage_collector:metrics.UsageCollector):
+    return
     usage_summary = usage_collector.get_summary()
     print(ctx.room.name)
     convsersations = []
@@ -131,6 +132,7 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"connecting to room {ctx.room.name}")
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     participant = await ctx.wait_for_participant()
+    metadata = json.loads(ctx.job.metadata)
 
     if ctx.room.name and ctx.room.name.startswith("call-"):
         call_details = participant.attributes
@@ -146,29 +148,43 @@ async def entrypoint(ctx: JobContext):
     # Wait for the first participant to connect
     print("participant=======================>",participant.attributes)
     logger.info(f"starting voice assistant for participant {participant.identity}")
-
+    
     config = await get_config_by_room_id(session_id)
     config_json = json.loads(config)
-    system_prompt = config_json.get("system_prompt", "")
-    actions = config_json.get("actions", [])
+    assistant_id = metadata.get("assistant_id")
+    agent_config = config_json.get("agents_config", {})
+    assistant_config = agent_config.get(str(assistant_id), {})
+    system_prompt = assistant_config.get("system_prompt", "")
+    support_agents = config_json.get("support_agents", []) or None
+    support_agent_transfer_prompt = " "
+    if support_agents:
+        print("====================================>support_agents",support_agents)
+        for agent in support_agents:
+            print("====================================>agent",agent)
+            support_agent_transfer_prompt += "\n\n " + (
+            f'When a user asks {agent["trigger"]},\n'
+            f'"say {agent["transfer_text"]}"'
+            f'pass transfer_to_agent tool to transfer to another agent Assistant ID {agent["assistant_id"]}'
+        ) 
+    system_prompt += support_agent_transfer_prompt
+    actions = assistant_config.get("actions", [])
     print("actions=======================>",actions)
-    kb_id = config_json.get("kb_id", "")
-    action_class = AssistantFnc(actions=actions,kb_id=kb_id,session_id=session_id,ctx=ctx)
+    kb_id = assistant_config.get("kb_id", "")
+    action_class = AssistantFnc(actions=actions,kb_id=kb_id,session_id=session_id,ctx=ctx,support_agents=support_agents)
     initial_message = config_json.get("initial_message", "Hey, how can I help you today?")
-    agent_config = config_json.get("agent", {})
-    tts_config = config_json.get("synthesizer", {})
-    stt_config = config_json.get("transcriber", {})
+    agent_config = assistant_config.get("agent", {})
+    tts_config = assistant_config.get("synthesizer", {})
+    stt_config = assistant_config.get("transcriber", {})
     llm_class = get_llm_class_by_model_name(agent_config.get("model"),config_json.get("api_key"))
     stt_class = get_stt_class(stt_config.get("model"),stt_config.get('api_key'))
     tts_class = get_tts_class(tts_config.get("model"),tts_config)
     metadata = json.loads(ctx.job.metadata)
     print("====================================>metadata",metadata)
-    if metadata.get("change_assistant"):
-        print("====================================>conversation_log",metadata.get('conversation_log'))
-        print("====================================>ctx.room.name",ctx.room.name)
+    if metadata.get("change_assistant") :
+
         initial_ctx = llm.ChatContext().append(
             role="system",
-            text=f"You are a helpful assistant. You are currently in a conversation with a user. Tranferred to you from another agent. The conversation log is as follows: {json.dumps(metadata.get('conversation_log'))} you need to continue the conversation with the user. And you are a sales agent for telsa only talk about tesla and its products",
+            text=f"You are a helpful assistant. You are currently in a conversation with a user. Tranferred to you from another agent. The conversation log is as follows: {json.dumps(metadata.get('conversation_log'))} you need to continue the conversation with the user. {system_prompt}",
         )
     else:
         initial_ctx = llm.ChatContext().append(
@@ -180,6 +196,10 @@ async def entrypoint(ctx: JobContext):
     # Other great providers exist like Cerebras, ElevenLabs, Groq, Play.ht, Rime, and more
     # Learn more and pick the best one for your app:
     # https://docs.livekit.io/agents/plugins
+    print("====================================>initial_ctx",initial_ctx)
+    print("====================================>system_prompt",stt_class)
+    print("====================================>tts_class",tts_class)
+    print("====================================>llm_class",llm_class)
     agent = VoicePipelineAgent(
         vad=ctx.proc.userdata["vad"],
         stt=stt_class,
@@ -253,7 +273,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-             agent_name="voice_widget2",
+             agent_name="voice_widget3",
              
         ),
     )
