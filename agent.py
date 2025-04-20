@@ -119,7 +119,9 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Connecting to room {ctx.room.name}")
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     participant = await ctx.wait_for_participant()
-    print("====================================>participant",participant.identity,participant.attributes,participant._info)
+    print("====================================>participant",participant._info,participant._info.attributes.get("sip.twilio.callSid"))
+
+    call_sid = participant._info.attributes.get("sip.twilio.callSid")
 
     metadata = json.loads(ctx.job.metadata)
     session_id = ctx.room.name
@@ -234,7 +236,8 @@ async def entrypoint(ctx: JobContext):
         "stt": stt_class,
         "tts": tts_class,
         "llm": llm_class,
-        "participant": participant
+        "participant": participant,
+        "call_sid":call_sid
     }
 
     logger.info(f"Session initialized: {session_id}")
@@ -255,56 +258,56 @@ async def entrypoint(ctx: JobContext):
         max_repeats = num_check_human_present_times
         prompt_message = reminder_messages[0]
         final_message = message_before_termination
-    
+
         last_user_activity = datetime.now()
         repeat_count = 0
-    
+
         is_user_speaking = False
         is_agent_speaking = False
-    
+
         @agent.on("user_speech_committed")
         def on_user_speech(user_msg):
             nonlocal last_user_activity
             last_user_activity = datetime.now()
             print("[Monitor] User speech committed. Updated last activity.")
-    
+
         @agent.on("user_started_speaking")
         def on_user_started():
             nonlocal is_user_speaking
             is_user_speaking = True
             print("[Monitor] User started speaking.")
-    
+
         @agent.on("user_stopped_speaking")
         def on_user_stopped():
             nonlocal is_user_speaking, last_user_activity
             is_user_speaking = False
             last_user_activity = datetime.now()
             print("[Monitor] User stopped speaking.")
-    
+
         @agent.on("agent_started_speaking")
         def on_agent_started():
             nonlocal is_agent_speaking
             is_agent_speaking = True
             print("[Monitor] Agent started speaking.")
-    
+
         @agent.on("agent_stopped_speaking")
         def on_agent_stopped():
             nonlocal is_agent_speaking, last_user_activity
             is_agent_speaking = False
             last_user_activity = datetime.now()
             print("[Monitor] Agent stopped speaking.")
-    
+
         while True:
             await asyncio.sleep(5)
-            
+
             if is_user_speaking or is_agent_speaking:
                 # Active speech detected, reset timer logic or skip
                 print("[Monitor] Skipping reminder check: Someone is speaking.")
                 continue
-            
+
             time_since_last = (datetime.now() - last_user_activity).total_seconds()
             print(f"[Monitor] Silence detected. Idle time: {time_since_last:.2f}s")
-    
+
             if time_since_last > silence_timeout:
                 if repeat_count < max_repeats:
                     await agent.say(prompt_message, allow_interruptions=True)
@@ -315,7 +318,7 @@ async def entrypoint(ctx: JobContext):
                     task = asyncio.create_task(agent.say(final_message, allow_interruptions=False))
                     task.add_done_callback(lambda _: asyncio.create_task(del_room()))
                     break
-                
+
 
 
     async def timeout_and_close_call():
