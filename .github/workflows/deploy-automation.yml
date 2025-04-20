@@ -24,7 +24,7 @@ jobs:
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
       with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        credentials_json: asdasd
 
     - name: Set up gcloud
       uses: google-github-actions/setup-gcloud@v2
@@ -72,6 +72,6 @@ jobs:
           
           
           echo "Deploying backend..."
-          docker run --env-file ~/workflows/.env -p 3000:80 --name livekit-agent-container -d us.gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/livekit-agent:latest
+          docker run --env-file ~/workflows/.env -p 3000:80 --name workflow-container -d us.gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/ai-workflow:latest
           
           echo "Deployment complete!"
