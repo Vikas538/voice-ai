@@ -20,6 +20,7 @@ logger = logging.getLogger("llm_actions")
 
 from redis_utils import get_config_by_room_id
 
+
 class AssistantFnc(llm.FunctionContext):
     def __init__(self,actions:list,kb_id:str,session_id:str,ctx:JobContext,support_agents:list):
     # First decorate and set class methods
@@ -44,6 +45,14 @@ class AssistantFnc(llm.FunctionContext):
                     description=f"Send an SMS to the specified recipient action_id = {action.get('id')} and session_id = {session_id}"
                 )(self.send_sms.__func__)
                 self.__class__.send_sms = sms_func
+            
+            elif action.get("type") == "CALL_TRANSFER":
+                transfer_to_agent_func = llm.ai_callable(
+                    name="transfer_to_agent",
+                    description=f"Transfer call to a human agent phone_number = {action.get('phone_number')} and session_id = {session_id}"
+                )(self.transfer_to_agent.__func__)
+                self.__class__.transfer_to_agent = transfer_to_agent_func
+
             elif action.get("type") == "APPOINTMENT":
                 appointment_func = llm.ai_callable(
                     name="create_appointment",
@@ -250,15 +259,52 @@ class AssistantFnc(llm.FunctionContext):
         # asyncio.create_task(current_ctx.say("transferred you to our telsa expert", allow_interruptions=True))
         # new_agent.start(current_ctx.room, current_ctx.participant)
 
+    async def transfer_to_phone_number( 
+        self,
+        phone_number: Annotated[str, llm.TypeInfo(description="Phone number to transfer the call to")],
+        session_id: Annotated[str, llm.TypeInfo(description="Session ID")],
+    ):
+        """Called when the user asks to transfer the call to a different phone number."""
+        logger.info(f"------------------------------------------------------->transferring to phone number and session_id = {session_id} ,phone_number = {phone_number}")
+        from livekit.api import LiveKitAPI
+        from livekit import rtc
+        from glocal_vaiables import ctx_agents
+        from livekit.protocol.sip import TransferSIPParticipantRequest
+        from livekit.protocol.sip import TransferSIPParticipantRequest
+
+        session_context = ctx_agents.get(session_id)
+        participant:rtc.RemoteParticipant = session_context["participant"]
+        async with LiveKitAPI() as lkapi:
+            transfer_to = 'tel:+1'+re.sub(r"\D", "", phone_number)
+            transfer_request = TransferSIPParticipantRequest(
+                participant_identity=participant.identity,
+                room_name=session_id,
+                transfer_to=transfer_to,
+                play_dialtone=False
+            )
+            logger.debug(f"Transfer request: {transfer_request}")
+
+            # Transfer caller       
+            await lkapi.sip.transfer_sip_participant(transfer_request)
+            logger.info(f"Successfully transferred participant {participant.identity}")
+
+
     async def close_call(self,session_id:Annotated[str, llm.TypeInfo(description="Session ID")]):
         """Called when the user asks to close the call."""
         logger.info(f"------------------------------------------------------->closing call and session_id = {session_id}")
         from glocal_vaiables import ctx_agents
+        from livekit.api import LiveKitAPI
+        from livekit.api import DeleteRoomRequest
         session_context = ctx_agents.get(session_id)
         current_ctx:JobContext = session_context["ctx"]
-        await current_ctx.api.delete_room(current_ctx.api.DeleteRoomRequest(room_name=session_id))
+        print("====================================>current_ctx",current_ctx)
+        async with LiveKitAPI() as lkapi:
+            await lkapi.room.delete_room(DeleteRoomRequest(
+                room=session_id
+            ))
+            await current_ctx.shutdown(reason="call_closed")
     
     
-# fnc_ctx = AssistantFnc()
+
 
 

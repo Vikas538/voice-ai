@@ -10,7 +10,7 @@ def initialize_redis(retries: int = 1):
     retry = Retry(backoff, retries)
     return Redis(  # type: ignore
         host=os.environ.get("REDISHOST", "34.67.141.27"),
-        port=int(os.environ.get("REDISPORT", 6379)),
+        port=int(os.environ.get("REDISPORT", 6377)),
         username=os.environ.get("REDISUSER", None),
         password=os.environ.get("REDISPASSWORD", "password"),
         db=0,
