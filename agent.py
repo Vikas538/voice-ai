@@ -6,7 +6,6 @@ import os
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
-from livekit.api import RoomParticipantIdentity
 
 from livekit.agents import (
     AutoSubscribe,
@@ -28,9 +27,8 @@ from livekit.agents.llm import ChatMessage
 load_dotenv(dotenv_path=".env.local")
 logger = logging.getLogger("voice-agent")
 
-from livekit.api import LiveKitAPI
+from livekit.api import LiveKitAPI,DeleteRoomRequest
 
-# Will read LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET from environment variables
 
 
 
@@ -118,13 +116,17 @@ async def shutdown_callback(ctx: JobContext, usage_collector: metrics.UsageColle
 async def entrypoint(ctx: JobContext):
     logger.info(f"Connecting to room {ctx.room.name}")
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+
     participant = await ctx.wait_for_participant()
-    print("====================================>participant",participant._info,participant._info.attributes.get("sip.twilio.callSid"))
+    print("====================================>participant",participant._info)
 
     call_sid = participant._info.attributes.get("sip.twilio.callSid")
 
     metadata = json.loads(ctx.job.metadata)
+    session_type = metadata.get("session_type")
     session_id = ctx.room.name
+
+
 
     if session_id.startswith("call-"):
         call_details = participant.attributes
@@ -164,8 +166,6 @@ async def entrypoint(ctx: JobContext):
     agent_model_config = assistant_config.get("agent", {})
     reminder_config = agent_model_config.get("additional_settings", {}).get("reminder", {})
 
-    print("====================================>remainder_config",agent_model_config.get("additional_settings", {}))
-    print("====================================>remainder_config",agent_model_config.get("additional_settings", {}).get("reminder", {}))
     llm_class = get_llm_class_by_model_name(agent_model_config.get("model"), agent_model_config.get("api_key"))
     stt_class = get_stt_class(stt_config.get("model"), stt_config.get('api_key'))
     tts_class = get_tts_class(tts_config.get("model"), tts_config)
@@ -177,7 +177,6 @@ async def entrypoint(ctx: JobContext):
     allowed_idle_time_seconds = reminder_config.get("allowed_idle_time_seconds", 30)
     num_check_human_present_times = reminder_config.get("num_check_human_present_times", 3)
 
-    print("====================================>metadata",metadata)
 
     if metadata.get("change_assistant"):
         initial_ctx = llm.ChatContext().append(
@@ -205,6 +204,14 @@ async def entrypoint(ctx: JobContext):
     usage_collector = metrics.UsageCollector()
     ctx.add_shutdown_callback(lambda reason: shutdown_callback(ctx, usage_collector))
 
+    is_user_activity_monitor_started = False
+
+    async def del_room():
+        async with LiveKitAPI() as lkapi:
+            await lkapi.room.delete_room(DeleteRoomRequest(
+                room=session_id
+            ))
+
     @agent.on("metrics_collected")
     def on_metrics_collected(agent_metrics: metrics.AgentMetrics):
         metrics.log_metrics(agent_metrics)
@@ -224,7 +231,23 @@ async def entrypoint(ctx: JobContext):
 
     @ctx.room.on("participant_disconnected")
     def on_participant_disconnected(participant):
-        logger.info(f"Participant disconnected: {participant.identity}")
+        logger.info(f"Participant ====================================>: {participant._info}")
+        asyncio.create_task(del_room())
+
+    def participant_metadata_changed():
+        nonlocal is_user_activity_monitor_started
+        if not is_user_activity_monitor_started and participant._info.attributes.get("sip.twilio.callSid"):
+            is_user_activity_monitor_started = True
+            call_sid = participant._info.attributes.get("sip.twilio.callSid")
+            asyncio.create_task(agent.say(initial_message, allow_interruptions=True))
+
+            asyncio.create_task(monitor_user_activity())
+            asyncio.create_task(asyncio.sleep(max_call_duration*60)).add_done_callback(lambda _: asyncio.create_task(timeout_and_close_call()))
+
+    ctx.room.on("participant_attributes_changed", participant_metadata_changed)
+
+
+
 
     agent.start(ctx.room, participant)
 
@@ -244,13 +267,8 @@ async def entrypoint(ctx: JobContext):
 
     await agent.say(initial_message, allow_interruptions=True)
 
-    async def del_room():
-        print("====================================>del_room")
-        async with LiveKitAPI() as lkapi:
-            await lkapi.room.remove_participant(RoomParticipantIdentity(
-                room=ctx.room.name,
-                identity=participant.identity
-            ))
+
+
 
     # Monitor silence and auto-end if user inactive
     async def monitor_user_activity():
@@ -261,6 +279,7 @@ async def entrypoint(ctx: JobContext):
 
         last_user_activity = datetime.now()
         repeat_count = 0
+        print("====================================>last_user_activity",last_user_activity)
 
         is_user_speaking = False
         is_agent_speaking = False
@@ -328,9 +347,9 @@ async def entrypoint(ctx: JobContext):
             task.add_done_callback(lambda _: asyncio.create_task(del_room()))
         except Exception as e:
             logger.error(f"Error closing call: {e}")
-
-    asyncio.create_task(monitor_user_activity())
-    asyncio.create_task(asyncio.sleep(max_call_duration*60)).add_done_callback(lambda _: asyncio.create_task(timeout_and_close_call()))
+    if not session_type or session_type != "VOICE_OUTGOING":
+        asyncio.create_task(monitor_user_activity())
+        asyncio.create_task(asyncio.sleep(max_call_duration*60)).add_done_callback(lambda _: asyncio.create_task(timeout_and_close_call()))
 
 
 if __name__ == "__main__":

@@ -47,11 +47,11 @@ class AssistantFnc(llm.FunctionContext):
                 self.__class__.send_sms = sms_func
             
             elif action.get("type") == "CALL_TRANSFER":
-                transfer_to_agent_func = llm.ai_callable(
-                    name="transfer_to_agent",
+                transfer_to_human_agent = llm.ai_callable(
+                    name="transfer_to_human_agent",
                     description=f"Transfer call to a human agent phone_number = {action.get('phone_number')} and session_id = {session_id}"
-                )(self.transfer_to_agent.__func__)
-                self.__class__.transfer_to_agent = transfer_to_agent_func
+                )(self.transfer_to_human_agent.__func__)
+                self.__class__.transfer_to_human_agent = transfer_to_human_agent
 
             elif action.get("type") == "APPOINTMENT":
                 appointment_func = llm.ai_callable(
@@ -259,7 +259,7 @@ class AssistantFnc(llm.FunctionContext):
         # asyncio.create_task(current_ctx.say("transferred you to our telsa expert", allow_interruptions=True))
         # new_agent.start(current_ctx.room, current_ctx.participant)
 
-    async def transfer_to_phone_number( 
+    async def transfer_to_human_agent( 
         self,
         phone_number: Annotated[str, llm.TypeInfo(description="Phone number to transfer the call to")],
         session_id: Annotated[str, llm.TypeInfo(description="Session ID")],
@@ -275,7 +275,7 @@ class AssistantFnc(llm.FunctionContext):
         session_context = ctx_agents.get(session_id)
         participant:rtc.RemoteParticipant = session_context["participant"]
         async with LiveKitAPI() as lkapi:
-            transfer_to = 'tel:+1'+re.sub(r"\D", "", phone_number)
+            transfer_to = 'tel:+'+re.sub(r"\D", "", phone_number)
             transfer_request = TransferSIPParticipantRequest(
                 participant_identity=participant.identity,
                 room_name=session_id,
@@ -302,7 +302,7 @@ class AssistantFnc(llm.FunctionContext):
             await lkapi.room.delete_room(DeleteRoomRequest(
                 room=session_id
             ))
-            await current_ctx.shutdown(reason="call_closed")
+            current_ctx.shutdown(reason="call_closed")
     
     
 
