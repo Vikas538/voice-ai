@@ -27,12 +27,6 @@ class AssistantFnc(llm.FunctionContext):
         print("====================================>support_agents",support_agents)
 
         for action in actions:
-            # if action.get("type") == "SEND_EMAIL":
-            #     weather_func = llm.ai_callable(
-            #         name="get_weather", 
-            #         description="get weather action id is 1234567890"
-            #     )(self.get_weather.__func__)
-            #     self.__class__.get_weather = weather_func
             if action.get("type") == "SEND_EMAIL":
                 email_func = llm.ai_callable(
                     name="send_email",
@@ -74,6 +68,21 @@ class AssistantFnc(llm.FunctionContext):
                     description=f"Transfer the conversation to the specified agent agent_id = {22} and session_id = {session_id}"
                 )(self.transfer_to_agent.__func__)
                 self.__class__.transfer_to_agent = transfer_to_agent_func
+
+            if action.get("type") == "SHOPIFY" :
+                shopify_aciton_type = action.get('webhook').get('type')
+                if shopify_aciton_type == "contactswing_shopify_order_status" or shopify_aciton_type == "contactswing_shopify_timeline":
+                    order_status_func = llm.ai_callable(
+                        name="contactswing_shopify_order_status",
+                        description=f"Use this only when user asks for order status or order timeline and session_id = {session_id} and shopify_action_type = {shopify_aciton_type} and action_id = {action.get('id')}"
+                    )(self.contactswing_shopify_order_status.__func__)
+                    self.__class__.contactswing_shopify_order_status = order_status_func
+                if shopify_aciton_type == "contactswing_shopify_search":
+                    contactswing_shopify_search = llm.ai_callable(
+                        name="contactswing_shopify_search",
+                        description=f"Use this only when user asks serch for some product and session_id = {session_id} and shopify_action_type = {shopify_aciton_type} and action_id = {action.get('id')}"
+                    )(self.contactswing_shopify_search.__func__)
+                    self.__class__.contactswing_shopify_search = contactswing_shopify_search
             
 
             close_call_func = llm.ai_callable(
@@ -90,21 +99,25 @@ class AssistantFnc(llm.FunctionContext):
 
 
     async def send_action_request(self,body:dict):
-        config = await get_config_by_room_id(body.get("session_id"))
-        config_json = json.loads(config)
-        auth_key = config_json.get("auth_key")
+        from glocal_vaiables import ctx_agents
+        session_context = ctx_agents.get(body.get("session_id"))
+        print("====================================>session_context",session_context)
+        assistant_id = session_context.get("assistant_id")
+        auth_key = session_context.get("auth_key")
         url = os.getenv("BACKEND_URL")
         if body.get("action_type") == "SEND_EMAIL":
-            url = f"{url}/send-grid/send-email?assistant_id={config_json.get('assistant_id')}&action_id={body.get('action_id')}"
+            url = f"{url}/send-grid/send-email?assistant_id={assistant_id}&action_id={body.get('action_id')}"
         elif body.get("action_type") == "SEND_SMS":
-            url = f"{url}/external/send/sms?assistant_id={config_json.get('assistant_id')}&action_id={body.get('action_id')}"
+            url = f"{url}/external/send/sms?assistant_id={assistant_id}&action_id={body.get('action_id')}"
         elif body.get("action_type") == "APPOINTMENT":
-            url = f"{url}/integration/calendar_natural_language/block?assistant_id={config_json.get('assistant_id')}&action_id={body.get('action_id')}"
+            url = f"{url}/integration/calendar_natural_language/block?assistant_id={assistant_id}&action_id={body.get('action_id')}"
+        elif body.get("action_type") == "SHOPIFY":
+            url = f"{url}/shopify/handle?assistant_id={assistant_id}&action_id={body.get('action_id')}"
         print(url)
         print(body)
         headers = {"Authorization":f"{auth_key}","Content-Type":"application/json"}
-        print(config_json.get("assistant_id"),config_json.get("auth_key"))
-        request_body = {**body,"assistant_id":config_json.get("assistant_id")}
+        print(assistant_id,auth_key)
+        request_body = {**body,"assistant_id":assistant_id}
         print(request_body)
         async with aiohttp.ClientSession() as session:
             async with session.post(url=url,json=request_body,headers=headers) as response:
@@ -228,6 +241,7 @@ class AssistantFnc(llm.FunctionContext):
         logger.info(f"------------------------------------------------------->transferring to agent and session_id = {session_id} ,agent_id = {agent_id}")
         from glocal_vaiables import ctx_agents
         session_context = ctx_agents.get(session_id)
+        print("====================================>session_context",session_context)
         current_ctx = session_context["ctx"]
         current_agent = session_context["agent"]
         from glocal_vaiables import conversation_log
@@ -304,7 +318,35 @@ class AssistantFnc(llm.FunctionContext):
             ))
             current_ctx.shutdown(reason="call_closed")
     
-    
 
+    async def contactswing_shopify_order_status(self,session_id:Annotated[str, llm.TypeInfo(description="Session ID")],order_id:Annotated[str, llm.TypeInfo(description="Order ID")],shopify_action_type:Annotated[str, llm.TypeInfo(description="Type")],action_id:Annotated[str, llm.TypeInfo(description="Action ID")]):
+        """Called when the user asks to get the order status from the Shopify order."""
+        logger.info(f"------------------------------------------------------->getting order status from the Shopify order and session_id = {session_id}")
+
+        body = {
+            "action_type":"SHOPIFY",
+            "order_id":order_id,
+            "shopify_action_type":shopify_action_type,
+            "session_id":session_id,
+            "action_id":action_id
+        }
+        result = await self.send_action_request(body)
+        print(result)
+        return f"result: {json.dumps(result)}"
+        
+    async def contactswing_shopify_search(self,session_id:Annotated[str, llm.TypeInfo(description="Session ID")],search_term:Annotated[str, llm.TypeInfo(description="The search term user requested for Example:'T-Shirt'")],shopify_action_type:Annotated[str, llm.TypeInfo(description="shopify action type example:contactswing_shopify_timeline")],action_id:Annotated[str, llm.TypeInfo(description="Action ID")]):
+        """Called when the user asks to search the Shopify order."""
+        logger.info(f"------------------------------------------------------->searching Shopify order and session_id = {session_id}")
+
+        body = {
+            "action_type":"SHOPIFY",
+            "search_term":search_term,
+            "shopify_action_type":shopify_action_type,
+            "session_id":session_id,
+            "action_id":action_id
+        }
+        result = await self.send_action_request(body)
+        print(result)
+        return f"result: {json.dumps(result)}"
 
 

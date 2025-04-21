@@ -24,6 +24,5 @@ def initialize_redis(retries: int = 1):
 
 async def get_config_by_room_id(room_id: str) -> dict:
     redis = initialize_redis()
-    print("====================================>",room_id)
     config = await redis.get(room_id)
     return config

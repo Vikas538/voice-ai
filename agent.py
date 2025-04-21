@@ -95,12 +95,17 @@ async def shutdown_callback(ctx: JobContext, usage_collector: metrics.UsageColle
             "role": log.role,
             "content": log.content
         })
+        from glocal_vaiables import ctx_agents
+        session_context = ctx_agents.get(ctx.room.name)
+        session_type = session_context.get("session_type")
+        print("====================================>session_type",session_type)
     async with aiohttp.ClientSession() as session:
         await session.post(
             url=f"{os.getenv('BACKEND_URL')}/save/conversations",
             json={
                 "conversations": convsersations,
                 "session_id": ctx.room.name,
+                "session_type": session_type,
                 "usage_summary": {
                     "llm_prompt_tokens": usage_summary.llm_prompt_tokens,
                     "llm_completion_tokens": usage_summary.llm_completion_tokens,
@@ -141,6 +146,7 @@ async def entrypoint(ctx: JobContext):
 
     config = await get_config_by_room_id(session_id)
     config_json = json.loads(config)
+    print("====================================>config_json",config_json.get("auth_key"))
     assistant_id = metadata.get("assistant_id")
     agent_config = config_json.get("agents_config", {}).get(str(assistant_id), {})
     assistant_config = agent_config
@@ -260,7 +266,11 @@ async def entrypoint(ctx: JobContext):
         "tts": tts_class,
         "llm": llm_class,
         "participant": participant,
-        "call_sid":call_sid
+        "session_type":session_type,
+        "call_sid":call_sid,
+        "assistant_details":assistant_config,
+        "assistant_id":assistant_id,
+        "auth_key":config_json.get("auth_key")
     }
 
     logger.info(f"Session initialized: {session_id}")
