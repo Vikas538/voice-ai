@@ -15,6 +15,8 @@ from livekit.agents import (
 import asyncio
 
 logger = logging.getLogger("llm_actions")
+from typing import Annotated
+import types
 
 
 
@@ -83,6 +85,21 @@ class AssistantFnc(llm.FunctionContext):
                         description=f"Use this only when user asks serch for some product and session_id = {session_id} and shopify_action_type = {shopify_aciton_type} and action_id = {action.get('id')}"
                     )(self.contactswing_shopify_search.__func__)
                     self.__class__.contactswing_shopify_search = contactswing_shopify_search
+
+            if action.get("type") == "WEBHOOK":
+                webhook_url = action.get("webhook", {}).get("url")
+                expected_fields = action.get("webhook", {}).get("expected_fields", [])
+                webhook_action_id = action.get("id")
+
+                dynamic_func = self.make_dynamic_webhook_caller(webhook_url, session_id, action)
+
+                decorated_func = llm.ai_callable(
+                    name=f"EXTERNAL_API_CALLER",
+                    description=f"Dynamic webhook caller for session_id={session_id}, action_id={webhook_action_id}"
+                )(dynamic_func)
+
+                # Attach it to class
+                setattr(self.__class__, f"EXTERNAL_API_CALLER", decorated_func)
             
 
             close_call_func = llm.ai_callable(
@@ -99,11 +116,13 @@ class AssistantFnc(llm.FunctionContext):
 
 
     async def send_action_request(self,body:dict):
+
+        print("====================================>body",body)
         from glocal_vaiables import ctx_agents
         session_context = ctx_agents.get(body.get("session_id"))
-        print("====================================>session_context",session_context)
         assistant_id = session_context.get("assistant_id")
         auth_key = session_context.get("auth_key")
+        actions = session_context.get("actions")
         url = os.getenv("BACKEND_URL")
         if body.get("action_type") == "SEND_EMAIL":
             url = f"{url}/send-grid/send-email?assistant_id={assistant_id}&action_id={body.get('action_id')}"
@@ -113,6 +132,32 @@ class AssistantFnc(llm.FunctionContext):
             url = f"{url}/integration/calendar_natural_language/block?assistant_id={assistant_id}&action_id={body.get('action_id')}"
         elif body.get("action_type") == "SHOPIFY":
             url = f"{url}/shopify/handle?assistant_id={assistant_id}&action_id={body.get('action_id')}"
+        elif body.get("action_type") == "WEBHOOK":
+            action_details = [action for action in actions if action.get("id") == body.get("action_id")]
+            if len(action_details) == 0:
+                return {"message":"Action not found"}
+            action_details = action_details[0]
+            url = action_details.get("webhook").get("url")
+            method = action_details.get("webhook").get("method")
+            headers = action_details.get("webhook").get("headers")
+            if action_details.get("webhook").get("type") == "dynamic"   :
+                body = body.get("payload")
+            else:
+                body = action_details.get("webhook").get("body")
+            query_params = action_details.get("webhook").get("query_params")
+            response = action_details.get("webhook").get("response")
+            
+            if method == "GET":
+                url = f"{url}?{query_params}"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url=url,headers=headers) as response:
+                        return await response.json()
+            elif method == "POST":
+                url = f"{url}"
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url=url,json=body,headers=headers) as response:
+                        return await response.json()
+            
         print(url)
         print(body)
         headers = {"Authorization":f"{auth_key}","Content-Type":"application/json"}
@@ -123,14 +168,7 @@ class AssistantFnc(llm.FunctionContext):
             async with session.post(url=url,json=request_body,headers=headers) as response:
                 return await response.json()
 
-    async def get_weather(
-        self,
-        location: Annotated[str, llm.TypeInfo(description="The location to get the weather for")],
-        action_id: Annotated[str, llm.TypeInfo(description="Action ID")],
-    ):
-        """Called when the user asks about the weather. This function will return the weather for the given location."""
-        print("action_id==================================================>", action_id)
-        # Rest of your implementation...
+
                 
     async def send_email(
         self,
@@ -302,7 +340,6 @@ class AssistantFnc(llm.FunctionContext):
             await lkapi.sip.transfer_sip_participant(transfer_request)
             logger.info(f"Successfully transferred participant {participant.identity}")
 
-
     async def close_call(self,session_id:Annotated[str, llm.TypeInfo(description="Session ID")]):
         """Called when the user asks to close the call."""
         logger.info(f"------------------------------------------------------->closing call and session_id = {session_id}")
@@ -348,5 +385,86 @@ class AssistantFnc(llm.FunctionContext):
         result = await self.send_action_request(body)
         print(result)
         return f"result: {json.dumps(result)}"
+    
+
+    def make_dynamic_webhook_caller(self, webhook_url: str, session_id: str, action_details: dict) -> types.FunctionType:
+        """Dynamically creates a webhook calling function with proper type annotations."""
+        # Initialize expected fields as empty dict
+        expected_fields = {}
 
 
+        # Extract expected fields from action details
+        if action_details.get("webhook") and action_details["webhook"].get("body"):
+
+            body_config = action_details["webhook"]["body"]
+            if isinstance(body_config, list) and len(body_config) > 0:
+                if body_config[0].get("type") == "dynamic":
+                    expected_fields = body_config[0].get("values", {})
+            elif isinstance(body_config, dict):
+                expected_fields = body_config.get("values", {})
+
+
+        
+
+        # Create the function signature dynamically
+        def create_function_code(fields):
+            parameters = []
+            body_lines = []
+
+            # Add fixed parameters
+            parameters.append("self")
+            parameters.append("action_id: Annotated[str, llm.TypeInfo(description='Action ID action_id = {action_id}')]")
+            parameters.append("session_id: Annotated[str, llm.TypeInfo(description='Session ID session_id = {session_id}')]")
+            
+
+            # Add dynamic parameters
+            for field_name, field_info in expected_fields.items():
+                desc = field_info.get("description", "")
+                param = f"{field_name}: Annotated[str, llm.TypeInfo(description='{desc}')]"
+                parameters.append(param)
+
+
+            # Build function signature
+            sig = f"async def EXTERNAL_API_CALLER({', '.join(parameters)}):"
+
+            # Build function body
+            body_lines.append('    """Dynamically generated webhook caller function."""')
+            body_lines.append(f'    logger.info("Calling webhook: {webhook_url}")')
+            body_lines.append('    payload = {')
+
+            # Add payload fields
+            for field_name in expected_fields.keys():
+                body_lines.append(f'        "{field_name}": {field_name},')
+
+            body_lines.append('    }')
+            body_lines.append('    body = {')
+            body_lines.append('        "action_type": "WEBHOOK",')
+            body_lines.append('        "action_id": action_id,')
+            body_lines.append('        "session_id": session_id,')
+            body_lines.append('        "payload": payload')
+            body_lines.append('    }')
+            body_lines.append('    result = await self.send_action_request(body)')
+            body_lines.append('    return f"result: {json.dumps(result)}"')
+
+            # Combine everything
+            return "\n".join([sig] + body_lines)
+
+        # Create the function dynamically
+        namespace = {"Annotated": Annotated, "llm": llm, "json": json, "logger": logger}
+        exec(create_function_code(expected_fields), namespace)
+
+        # Get the created function
+        dynamic_func = namespace["EXTERNAL_API_CALLER"]
+
+        # Set proper docstring
+        param_descriptions = ["action_id: Action ID", "session_id: Session ID"]
+        for field_name, field_info in expected_fields.items():
+            desc = field_info.get("description", "")
+            param_descriptions.append(f"{field_name}: {desc}")
+
+        dynamic_func.__doc__ = (
+            f"Dynamically generated webhook caller for {webhook_url}\n"
+            f"Parameters:\n" + "\n".join(param_descriptions)
+        )
+
+        return dynamic_func

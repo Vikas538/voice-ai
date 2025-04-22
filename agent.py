@@ -98,7 +98,6 @@ async def shutdown_callback(ctx: JobContext, usage_collector: metrics.UsageColle
         from glocal_vaiables import ctx_agents
         session_context = ctx_agents.get(ctx.room.name)
         session_type = session_context.get("session_type")
-        print("====================================>session_type",session_type)
     async with aiohttp.ClientSession() as session:
         await session.post(
             url=f"{os.getenv('BACKEND_URL')}/save/conversations",
@@ -123,7 +122,7 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
     participant = await ctx.wait_for_participant()
-    print("====================================>participant",participant._info)
+
 
     call_sid = participant._info.attributes.get("sip.twilio.callSid")
 
@@ -268,9 +267,9 @@ async def entrypoint(ctx: JobContext):
         "participant": participant,
         "session_type":session_type,
         "call_sid":call_sid,
-        "assistant_details":assistant_config,
         "assistant_id":assistant_id,
-        "auth_key":config_json.get("auth_key")
+        "auth_key":config_json.get("auth_key"),
+        "actions":actions
     }
 
     logger.info(f"Session initialized: {session_id}")
